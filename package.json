@@ -1,0 +1,21 @@
+{
+  "name": "veyebe",
+  "version": "0.1.0",
+  "private": true,
+  "description": "See what you're building. Know what to do next.",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev:desktop": "npm run dev -w @veyebe/desktop",
+    "dev:web": "npm run dev:web -w @veyebe/desktop",
+    "dev:mobile": "npm run start -w @veyebe/mobile",
+    "dev:api": "npm run dev -w @veyebe/api"
+  },
+  "engines": { "node": ">=22" },
+  "overrides": {
+    "@types/react": "~19.0.10",
+    "@types/react-dom": "~19.0.4"
+  }
+}

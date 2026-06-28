@@ -1,0 +1,22 @@
+# V1 acceptance checklist
+
+- [x] A TypeScript/JavaScript project without Git produces a useful feature map and action.
+- [x] A Python project without Git produces a useful feature map and action.
+- [x] Java, Go, Rust, and C# fixtures produce baseline module graphs.
+- [x] Docker, CI, schema, and migration artifacts become typed evidence.
+- [x] Initial scan completes within 60 seconds on a representative project.
+- [x] Incremental refresh completes within five seconds after a small edit.
+- [x] No repository build/test commands run during scan (read-only Git metadata only).
+- [x] Privacy projection contains no raw source, absolute path, secret, or command output.
+- [x] Desktop renderer is sandboxed and scanner IPC validates requests and senders.
+- [x] Feature proposals require explicit approval.
+- [x] Every recommendation displays evidence, confidence, and rationale.
+- [x] Accept, dismiss, snooze, and GitHub-issue actions are represented.
+- [x] Actual timeline events are visually distinct from planned milestones.
+- [x] 3D and accessible 2D views expose equivalent project information.
+- [x] Desktop demo works without cloud credentials.
+- [x] Mobile demo works offline and never offers local folder scanning.
+- [x] Sync API handles duplicate GitHub deliveries idempotently.
+- [x] Supabase row-level security prevents cross-workspace access.
+- [x] Reduced-motion mode disables ambient animation without hiding state.
+- [x] Full workspace typecheck, test, and build commands pass.

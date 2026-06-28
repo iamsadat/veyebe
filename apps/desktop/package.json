@@ -1,0 +1,42 @@
+{
+  "name": "@veyebe/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "dev:web": "vite --host 0.0.0.0",
+    "build": "electron-vite build",
+    "build:web": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@veyebe/sync": "0.1.0",
+    "@veyebe/analyzer": "0.1.0",
+    "@veyebe/domain": "0.1.0",
+    "@react-three/drei": "^10.5.1",
+    "@react-three/fiber": "^9.2.0",
+    "lucide-react": "^0.468.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "three": "^0.177.0",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^22.15.32",
+    "@types/react": "~19.0.10",
+    "@types/react-dom": "^19.0.3",
+    "@types/three": "^0.177.0",
+    "@vitejs/plugin-react": "^4.5.2",
+    "electron": "^36.4.0",
+    "electron-vite": "^3.1.0",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4"
+  }
+}

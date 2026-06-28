@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "Veyebe",
+    "slug": "veyebe",
+    "scheme": "veyebe",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": { "supportsTablet": true, "bundleIdentifier": "app.veyebe.mobile" },
+    "android": { "package": "app.veyebe.mobile", "adaptiveIcon": { "backgroundColor": "#090C15" } },
+    "plugins": ["expo-gl"]
+  }
+}
