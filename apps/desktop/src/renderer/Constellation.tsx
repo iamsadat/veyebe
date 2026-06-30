@@ -29,11 +29,14 @@ const BloomFx = Bloom as ComponentType<{ intensity?: number; luminanceThreshold?
 
 const colors: Record<FeatureState, string> = { proposed: '#96a0ad', planned: '#7c8cff', active: '#b778ff', needs_verification: '#ffb75e', verified: '#61e6b5', blocked: '#ff657d', parked: '#596372' }
 
+const NODE_START_SCALE = 0.4
+
 const Node = memo(({ feature, selected, still, architecture, index, onSelect }: { feature: Feature; selected: boolean; still: boolean; architecture: boolean; index: number; onSelect: () => void }) => {
   const ref = useRef<THREE.Group>(null)
   const halo = useRef<THREE.Mesh>(null)
   const ring = useRef<THREE.Mesh>(null)
   const born = useRef(0)
+  const settled = useRef(false)
   const color = colors[feature.state]
   const delay = index * 0.07
 
@@ -42,9 +45,12 @@ const Node = memo(({ feature, selected, still, architecture, index, onSelect }: 
     if (!g || still) return
     const t = clock.elapsedTime
     if (born.current === 0) born.current = t
-    // staggered scale-in entrance (ease-out cubic)
-    const a = Math.min(1, Math.max(0, (t - born.current - delay) / 0.6))
-    g.scale.setScalar(1 - Math.pow(1 - a, 3))
+    // staggered scale-in entrance (ease-out cubic) — settles once, then becomes a no-op
+    if (!settled.current) {
+      const a = Math.min(1, Math.max(0, (t - born.current - delay) / 0.6))
+      if (a >= 1) { g.scale.setScalar(1); settled.current = true }
+      else g.scale.setScalar(NODE_START_SCALE + (1 - NODE_START_SCALE) * (1 - Math.pow(1 - a, 3)))
+    }
     // selected halo breathes
     if (halo.current) halo.current.scale.setScalar(1 + Math.sin(t * 3) * 0.07)
     // blocked node — angry shimmer
@@ -55,14 +61,14 @@ const Node = memo(({ feature, selected, still, architecture, index, onSelect }: 
   })
 
   const inner = (
-    <group ref={ref} scale={still ? 1 : 0.0001}>
+    <group ref={ref} scale={still ? 1 : NODE_START_SCALE}>
       <mesh onClick={(e) => { e.stopPropagation(); onSelect() }} scale={selected ? 1.18 : 1}>
         <sphereGeometry args={[0.34, 32, 32]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={selected ? 2.8 : 0.75} roughness={0.22} toneMapped={false} />
       </mesh>
       {feature.state === 'blocked' && <mesh ref={ring} scale={1.35}><torusGeometry args={[0.36, 0.022, 8, 48]} /><meshBasicMaterial color="#ff657d" transparent opacity={0.75} toneMapped={false} /></mesh>}
       {selected && <BillboardFx><mesh ref={halo}><ringGeometry args={[0.5, 0.58, 56]} /><meshBasicMaterial color={color} transparent opacity={0.65} side={THREE.DoubleSide} toneMapped={false} /></mesh></BillboardFx>}
-      {feature.evidence.map((item, i) => { const ang = (i / Math.max(1, feature.evidence.length)) * Math.PI * 2; return <mesh key={item.id} position={[Math.cos(ang) * 0.62, Math.sin(ang) * 0.62, 0]}><sphereGeometry args={[0.055, 12, 12]} /><meshBasicMaterial color={item.verified ? '#d9fff0' : '#667080'} toneMapped={!item.verified} /></mesh> })}
+      {feature.evidence.map((item, i) => { const ang = (i / Math.max(1, feature.evidence.length)) * Math.PI * 2; return <mesh key={item.id} position={[Math.cos(ang) * 0.62, Math.sin(ang) * 0.62, 0]}><sphereGeometry args={[0.055, 12, 12]} /><meshBasicMaterial color={item.verified ? '#d9fff0' : '#667080'} /></mesh> })}
       <BillboardFx position={[0, -0.62, 0]}><HtmlFx center distanceFactor={8} style={{ pointerEvents: 'none' }}><div className={`space-label ${selected ? 'selected' : ''}`}><span>{feature.title}</span>{architecture && <small>{feature.evidence.filter(e => e.kind === 'code_entity').length} modules</small>}</div></HtmlFx></BillboardFx>
     </group>
   )
@@ -77,7 +83,7 @@ const Core = memo(({ still }: { still: boolean }) => {
   const core = (
     <>
       <mesh ref={ref}>
-        <icosahedronGeometry args={[0.86, 5]} />
+        <icosahedronGeometry args={[0.86, 3]} />
         <DistortFx color="#fbf7ff" emissive="#8750ff" emissiveIntensity={1.8} roughness={0.3} metalness={0.1} distort={still ? 0.22 : 0.34} speed={still ? 0 : 1.6} radius={1} />
       </mesh>
       <mesh scale={1.55}><icosahedronGeometry args={[0.86, 1]} /><meshBasicMaterial color="#7d4dff" transparent opacity={0.06} wireframe toneMapped={false} /></mesh>
@@ -137,7 +143,7 @@ const CameraRig = memo(({ target, still }: { target: Vec3; still: boolean }) => 
   useFrame(() => {
     if (still || !controls) return
     desired.set(target[0], target[1], target[2])
-    controls.target.lerp(desired, 0.045)
+    controls.target.lerp(desired, 0.05)
     controls.update()
   })
   return null
@@ -152,16 +158,16 @@ export const Constellation = memo(({ features, selectedId, onSelect, architectur
   return <Canvas camera={{ position: [0, 0, 8.5], fov: 48 }} dpr={dpr} gl={{ antialias: true, alpha: true }} aria-label="Interactive project constellation">
     <fog attach="fog" args={['#0a0912', 9, 26]} />
     <ambientLight intensity={0.35} />
-    <StarsFx radius={60} depth={40} count={2200} factor={3.4} saturation={0} fade speed={reducedMotion ? 0 : 0.4} />
+    <StarsFx radius={60} depth={40} count={1200} factor={3.4} saturation={0} fade speed={reducedMotion ? 0 : 0.4} />
     <Core still={reducedMotion} />
     {features.map(feature => <LineFx key={`core-${feature.id}`} points={[[0, 0, 0], feature.position]} color={colors[feature.state]} transparent opacity={architecture ? 0.28 : 0.12} lineWidth={architecture ? 1.2 : 0.6} />)}
     {links.map((points, i) => <LineFx key={i} points={points} color="#c9b8ff" transparent opacity={0.35} dashed dashScale={7} lineWidth={1} />)}
     <PulseFlow links={links} still={reducedMotion} />
     {features.map((feature, i) => <Node key={feature.id} feature={feature} index={i} selected={feature.id === selectedId} still={reducedMotion} architecture={architecture} onSelect={() => onSelect(feature)} />)}
-    <OrbitControlsFx makeDefault enablePan={false} enableDamping dampingFactor={0.08} minDistance={6} maxDistance={11} autoRotate={!reducedMotion} autoRotateSpeed={0.12} />
+    <OrbitControlsFx makeDefault enablePan={false} enableDamping dampingFactor={0.07} minDistance={4.5} maxDistance={16} />
     <CameraRig target={focus} still={reducedMotion} />
-    <EffectComposerFx>
-      <BloomFx intensity={1.15} luminanceThreshold={0.18} luminanceSmoothing={0.85} mipmapBlur radius={0.75} />
+    <EffectComposerFx multisampling={0}>
+      <BloomFx intensity={0.8} luminanceThreshold={0.28} luminanceSmoothing={0.85} mipmapBlur radius={0.5} />
     </EffectComposerFx>
   </Canvas>
 })
