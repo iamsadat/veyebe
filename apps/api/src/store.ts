@@ -63,13 +63,14 @@ export class MemoryStore implements AppStore {
     const project = this.projects.get(`${workspaceId}:${projectId}`);
     const snapshot = [...this.snapshots.values()].find((item) => item.workspaceId === workspaceId && item.projectId === projectId);
     if (!project && !snapshot) return undefined;
+    const evidenceCount = [...this.evidence.values()].filter((e) => e.projectId === projectId).length;
     const features = [...this.features.values()]
       .filter((item) => item.workspaceId === workspaceId && item.projectId === projectId)
       .map((item) => ({
         id: item.id,
         name: item.title,
         state: item.state,
-        evidence: [...this.evidence.values()].filter((e) => e.projectId === projectId).length,
+        evidence: evidenceCount,
         confidence: item.confidence,
         approved: item.approved,
       }));
@@ -84,7 +85,10 @@ export class MemoryStore implements AppStore {
     };
   }
 
-  async saveRecommendationAction(action: RecommendationAction): Promise<boolean> { this.actions.set(action.recommendationId, action); return true; }
+  async saveRecommendationAction(action: RecommendationAction, userId?: string): Promise<boolean> {
+    this.actions.set(action.recommendationId, action);
+    return true;
+  }
   async canAccessWorkspace(userId: string, workspaceId: string): Promise<boolean> {
     const members = this.workspaceMembers.get(workspaceId);
     return !members || members.has(userId);
@@ -95,7 +99,9 @@ export class MemoryStore implements AppStore {
     this.githubEvents.set(deliveryId, { event_name: eventName, payload, workspace_id: workspaceId });
     return true;
   }
-  async getGitHubEvent(deliveryId: string) { return this.githubEvents.get(deliveryId); }
+  async getGitHubEvent(deliveryId: string): Promise<{ event_name: string; payload: unknown; workspace_id?: string } | undefined> {
+    return this.githubEvents.get(deliveryId);
+  }
 }
 
 class SupabaseStore implements AppStore {
@@ -149,13 +155,13 @@ class SupabaseStore implements AppStore {
     if (projectError) throw projectError;
     if (!project) return undefined;
 
-    const { data: features, error: featureError } = await this.client.from("features").select("*").eq("workspace_id", workspaceId).eq("project_id", projectId);
+    const [{ data: features, error: featureError }, { data: recommendations, error: recError }, { data: milestones, error: milestoneError }] = await Promise.all([
+      this.client.from("features").select("*").eq("workspace_id", workspaceId).eq("project_id", projectId),
+      this.client.from("recommendations").select("*").eq("workspace_id", workspaceId).eq("project_id", projectId).eq("status", "open"),
+      this.client.from("milestones").select("*").eq("workspace_id", workspaceId).eq("project_id", projectId),
+    ]);
     if (featureError) throw featureError;
-
-    const { data: recommendations, error: recError } = await this.client.from("recommendations").select("*").eq("workspace_id", workspaceId).eq("project_id", projectId).eq("status", "open");
     if (recError) throw recError;
-
-    const { data: milestones, error: milestoneError } = await this.client.from("milestones").select("*").eq("workspace_id", workspaceId).eq("project_id", projectId);
     if (milestoneError) throw milestoneError;
 
     return {

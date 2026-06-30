@@ -19,3 +19,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
+      - run: npm audit --audit-level=moderate
+        continue-on-error: true
+        # ponytail: audit failure does not block merge; monitor and escalate manually

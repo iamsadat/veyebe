@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, memo, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
   Bell,
@@ -28,7 +28,7 @@ import type {
   Recommendation,
   ScanSnapshot,
 } from "../shared/contracts";
-import { Constellation } from "./Constellation";
+const Constellation = lazy(() => import('./Constellation').then(m => ({ default: m.Constellation })));
 import { demoSnapshot, initialRecommendations } from "./demo";
 
 const stateLabel: Record<FeatureState, string> = {
@@ -114,12 +114,12 @@ export function App() {
           : "Recommendation dismissed.",
     );
   }
-  const openRecommendations = recommendations.filter(
+  const openRecommendations = useMemo(() => recommendations.filter(
     (item) => item.status === "open",
-  );
-  const verifiedCount = snapshot.features.filter(
+  ), [recommendations]);
+  const verifiedCount = useMemo(() => snapshot.features.filter(
     (feature) => feature.state === "verified",
-  ).length;
+  ).length, [snapshot.features]);
 
   return (
     <div className="app-shell">
@@ -152,9 +152,9 @@ export function App() {
           </button>
         </nav>
         <div className="top-actions">
-          <button className="icon-button" aria-label="Notifications">
+          <button className="icon-button" aria-label={`Notifications. ${openRecommendations.length} unread`}>
             <Bell size={17} />
-            <b>{openRecommendations.length}</b>
+            <b aria-hidden="true">{openRecommendations.length}</b>
           </button>
           <button
             className="open-button"
@@ -236,13 +236,15 @@ export function App() {
               </div>
               <div className="map-stage">
                 {!listMode ? (
-                  <Constellation
-                    features={snapshot.features}
-                    selectedId={selected?.id}
-                    onSelect={setSelected}
-                    architecture={architecture}
-                    reducedMotion={reducedMotion}
-                  />
+                  <Suspense fallback={<div style={{display:'grid',placeItems:'center',height:'100%',color:'#8c93a1'}}>Loading constellation...</div>}>
+                    <Constellation
+                      features={snapshot.features}
+                      selectedId={selected?.id}
+                      onSelect={setSelected}
+                      architecture={architecture}
+                      reducedMotion={reducedMotion}
+                    />
+                  </Suspense>
                 ) : (
                   <FeatureList
                     features={snapshot.features}
@@ -301,14 +303,14 @@ export function App() {
                   }}
                 />
               ) : (
-                <div className="empty-selection">
-                  <CircleDot />
+                <section className="empty-selection">
+                  <CircleDot aria-hidden="true" />
                   <h3>Select a feature</h3>
                   <p>
                     Every point in the constellation leads back to inspectable
                     evidence.
                   </p>
-                </div>
+                </section>
               )}
               <RecommendationList
                 items={openRecommendations}
@@ -350,7 +352,7 @@ export function App() {
   );
 }
 
-function Metric({
+const Metric = memo(({
   value,
   label,
   icon,
@@ -358,8 +360,7 @@ function Metric({
   value: string;
   label: string;
   icon: ReactNode;
-}) {
-  return (
+}) => (
     <div className="metric">
       <span>{icon}</span>
       <div>
@@ -367,10 +368,9 @@ function Metric({
         <small>{label}</small>
       </div>
     </div>
-  );
-}
+))
 
-function FeatureList({
+const FeatureList = memo(({
   features,
   selected,
   onSelect,
@@ -378,8 +378,7 @@ function FeatureList({
   features: Feature[];
   selected?: Feature;
   onSelect: (feature: Feature) => void;
-}) {
-  return (
+}) => (
     <div className="feature-list">
       {features.map((feature) => (
         <button
@@ -399,10 +398,9 @@ function FeatureList({
         </button>
       ))}
     </div>
-  );
-}
+))
 
-function EvidenceDrawer({
+const EvidenceDrawer = memo(({
   feature,
   onClose,
   onApprove,
@@ -410,14 +408,14 @@ function EvidenceDrawer({
   feature: Feature;
   onClose: () => void;
   onApprove: (featureId: string) => void | Promise<void>;
-}) {
+}) => {
   return (
     <section className="evidence-card">
       <div className="card-kicker">
         <span className={`state-pill ${feature.state}`}>
           {stateIcon[feature.state]} {stateLabel[feature.state]}
         </span>
-        <button className="bare" onClick={onClose} aria-label="Close evidence">
+        <button className="bare" onClick={onClose} aria-label={`Close evidence for ${feature.title}`}>
           <X size={16} />
         </button>
       </div>
@@ -464,9 +462,9 @@ function EvidenceDrawer({
       </div>
     </section>
   );
-}
+})
 
-function RecommendationList({
+const RecommendationList = memo(({
   items,
   onAct,
   onNotice,
@@ -539,7 +537,7 @@ function RecommendationList({
               </button>
               <button
                 onClick={() => onAct(item.id, "dismissed")}
-                aria-label="Dismiss"
+                aria-label={`Dismiss recommendation: ${item.title}`}
               >
                 <X size={13} />
               </button>
@@ -549,9 +547,9 @@ function RecommendationList({
       )}
     </section>
   );
-}
+})
 
-function Timeline({ snapshot }: { snapshot: ScanSnapshot }) {
+const Timeline = memo(({ snapshot }: { snapshot: ScanSnapshot }) => {
   const events = snapshot.timeline.length
     ? snapshot.timeline
     : [{ id: "scan", date: "Latest scan", title: "Repository analyzed", detail: `${snapshot.metrics.files.toLocaleString()} files mapped locally`, actual: true }];
@@ -595,15 +593,15 @@ function Timeline({ snapshot }: { snapshot: ScanSnapshot }) {
       </div>
     </section>
   );
-}
+})
 
-function PrivacyPreview({
+const PrivacyPreview = memo(({
   snapshot,
   onSync,
 }: {
   snapshot: ScanSnapshot;
   onSync: () => void | Promise<void>;
-}) {
+}) => {
   const payload = snapshot.privacyPreview ?? {
     project: snapshot.projectName,
     feature_states: snapshot.features.map(({ id, state, confidence }) => ({
@@ -655,4 +653,4 @@ function PrivacyPreview({
       </div>
     </section>
   );
-}
+})

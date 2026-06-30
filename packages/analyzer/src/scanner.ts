@@ -159,9 +159,13 @@ export async function scanProject(rootPath: string, options: ScanProjectOptions 
     const language = detectLanguage(file.relativePath);
     let lines = 0;
     if (file.size <= (options.maxTextFileBytes ?? 2_000_000) && isLikelyText(file.relativePath)) {
-      const content = await readFile(file.absolutePath, "utf8");
-      lines = content.length === 0 ? 0 : content.split(/\r?\n/).length;
-      totalLines += lines;
+      try {
+        const content = await readFile(file.absolutePath, "utf8");
+        lines = content.length === 0 ? 0 : content.split(/\r?\n/).length;
+        totalLines += lines;
+      } catch (error) {
+        discovered.warnings.push(`Could not read ${file.relativePath}: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
     }
     if (language !== "other") {
       const metric = languageMap.get(language) ?? { language, files: 0, lines: 0, bytes: 0 };
@@ -171,11 +175,17 @@ export async function scanProject(rootPath: string, options: ScanProjectOptions 
       languageMap.set(language, metric);
     }
     if (capabilities.length > 0 || (language !== "other" && evidence.length < 500)) evidence.push(evidenceFor(file, capabilities, scannedAt));
+    let sha256 = "";
+    try {
+      sha256 = await hashFile(file.absolutePath);
+    } catch (error) {
+      discovered.warnings.push(`Could not hash ${file.relativePath}: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
     fingerprints[file.relativePath] = {
       relativePath: file.relativePath,
       size: file.size,
       modifiedAtMs: file.modifiedAtMs,
-      sha256: await hashFile(file.absolutePath),
+      sha256,
     };
   }
 

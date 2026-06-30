@@ -6,6 +6,17 @@ function env(name: string): string | undefined {
   return value || undefined
 }
 
+const DEFAULT_API_URL = 'http://127.0.0.1:4317'
+
+function getApiUrl(required = false): string {
+  const url = env('VEYEBE_API_URL')
+  if (!url) {
+    if (required) throw new Error('VEYEBE_API_URL environment variable must be set for sync')
+    return DEFAULT_API_URL
+  }
+  return url
+}
+
 function mapMetrics(snapshot: ScanSnapshot): ScanSyncPayload['metrics'] {
   return {
     fileCount: snapshot.metrics.files,
@@ -57,7 +68,7 @@ function mapPreview(snapshot: ScanSnapshot) {
 }
 
 export async function syncSnapshot(snapshot: ScanSnapshot, bearerToken?: string) {
-  const apiUrl = env('VEYEBE_API_URL') ?? 'http://127.0.0.1:4317'
+  const apiUrl = getApiUrl(true)
   const workspaceId = env('VEYEBE_WORKSPACE_ID') ?? 'workspace_personal'
   const { preview, projectId } = mapPreview(snapshot)
   const payload = buildScanSyncPayload(preview, {
@@ -79,34 +90,46 @@ export async function createGitHubIssue(input: {
   owner?: string
   repository?: string
 }) {
-  const apiUrl = env('VEYEBE_API_URL') ?? 'http://127.0.0.1:4317'
+  const apiUrl = getApiUrl()
   const installationId = input.installationId ?? Number(env('GITHUB_INSTALLATION_ID'))
   const owner = input.owner ?? env('GITHUB_OWNER')
   const repository = input.repository ?? env('GITHUB_REPOSITORY')
   if (!installationId || !owner || !repository) {
-    const install = await fetch(new URL('/v1/github/install-url', apiUrl))
-    if (install.ok) {
-      const data = await install.json() as { url: string }
-      return { installUrl: data.url }
+    try {
+      const install = await fetch(new URL('/v1/github/install-url', apiUrl))
+      if (install.ok) {
+        const data = await install.json() as { url: string }
+        return { installUrl: data.url }
+      }
+    } catch (error) {
+      throw new Error(`Failed to fetch GitHub install URL: ${error instanceof Error ? error.message : 'unknown error'}`)
     }
     throw new Error('GitHub is not configured. Set GITHUB_INSTALLATION_ID, GITHUB_OWNER, and GITHUB_REPOSITORY.')
   }
-  const response = await fetch(new URL('/v1/github/issues', apiUrl), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ installationId, owner, repository, title: input.title, body: input.body }),
-  })
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`GitHub issue failed (${response.status}): ${body}`)
+  try {
+    const response = await fetch(new URL('/v1/github/issues', apiUrl), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ installationId, owner, repository, title: input.title, body: input.body }),
+    })
+    if (!response.ok) {
+      const body = await response.text()
+      throw new Error(`GitHub issue failed (${response.status}): ${body}`)
+    }
+    const result = await response.json() as { html_url?: string }
+    return { url: result.html_url }
+  } catch (error) {
+    throw new Error(`Failed to create GitHub issue: ${error instanceof Error ? error.message : 'unknown error'}`)
   }
-  const result = await response.json() as { html_url?: string }
-  return { url: result.html_url }
 }
 
 export async function getGitHubInstallUrl() {
-  const apiUrl = env('VEYEBE_API_URL') ?? 'http://127.0.0.1:4317'
-  const response = await fetch(new URL('/v1/github/install-url', apiUrl))
-  if (!response.ok) return { error: 'github_not_configured' as const }
-  return response.json() as Promise<{ url: string }>
+  const apiUrl = getApiUrl()
+  try {
+    const response = await fetch(new URL('/v1/github/install-url', apiUrl))
+    if (!response.ok) return { error: 'github_not_configured' as const }
+    return response.json() as Promise<{ url: string }>
+  } catch (error) {
+    return { error: 'github_not_configured' as const }
+  }
 }

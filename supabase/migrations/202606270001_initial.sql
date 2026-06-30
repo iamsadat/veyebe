@@ -78,6 +78,7 @@ create table public.features (
   dependency_ids text[] not null default '{}',
   updated_at timestamptz not null default now()
 );
+create index features_workspace_project_idx on public.features(workspace_id, project_id);
 
 create table public.evidence (
   id text primary key,
@@ -91,6 +92,7 @@ create table public.evidence (
   confidence real not null check (confidence between 0 and 1),
   tags text[] not null default '{}'
 );
+create index evidence_workspace_project_idx on public.evidence(workspace_id, project_id);
 
 create table public.recommendations (
   id text primary key,
@@ -108,6 +110,7 @@ create table public.recommendations (
   created_at timestamptz not null default now(),
   unique(project_id, fingerprint)
 );
+create index recommendations_workspace_project_status_idx on public.recommendations(workspace_id, project_id, status);
 
 create table public.recommendation_evidence (
   recommendation_id text not null references public.recommendations(id) on delete cascade,
@@ -125,6 +128,7 @@ create table public.milestones (
   feature_ids text[] not null default '{}',
   created_at timestamptz not null default now()
 );
+create index milestones_workspace_project_idx on public.milestones(workspace_id, project_id);
 
 create table public.github_events (
   delivery_id text primary key,
@@ -134,6 +138,7 @@ create table public.github_events (
   received_at timestamptz not null default now(),
   processed_at timestamptz
 );
+create index github_events_workspace_idx on public.github_events(workspace_id) where workspace_id is not null;
 
 create table public.privacy_audit_log (
   id bigint generated always as identity primary key,
