@@ -181,8 +181,10 @@ const styles = StyleSheet.create({
   },
   switchItem: {
     flex: 1,
-    paddingVertical: 9,
+    paddingVertical: 12,
+    minHeight: 48,
     alignItems: "center",
+    justifyContent: "center",
     borderRadius: 9,
   },
   switchActive: { backgroundColor: "#27213C" },

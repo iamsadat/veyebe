@@ -19,16 +19,21 @@ export async function fetchProjectPulse(
 ): Promise<ProjectPulse | undefined> {
   if (!API_URL) return undefined;
   const token = await getStoredToken();
-  const response = await fetch(
-    `${API_URL}/v1/workspaces/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(projectId)}/pulse`,
-    {
-      headers: {
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
+  try {
+    const response = await fetch(
+      `${API_URL}/v1/workspaces/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(projectId)}/pulse`,
+      {
+        headers: {
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
       },
-    },
-  );
-  if (!response.ok) return undefined;
-  return response.json() as Promise<ProjectPulse>;
+    );
+    if (!response.ok) return undefined;
+    return response.json() as Promise<ProjectPulse>;
+  } catch (error) {
+    console.error("Failed to fetch project pulse:", error);
+    return undefined;
+  }
 }
 
 export async function patchRecommendation(
@@ -37,18 +42,35 @@ export async function patchRecommendation(
 ): Promise<boolean> {
   if (!API_URL) return false;
   const token = await getStoredToken();
-  const response = await fetch(`${API_URL}/v1/recommendations/${id}`, {
-    method: "PATCH",
-    headers: {
-      "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({
-      status,
-      ...(status === "snoozed"
-        ? { snoozedUntil: new Date(Date.now() + 86_400_000).toISOString() }
-        : {}),
-    }),
-  });
-  return response.ok;
+  if (status === "snoozed") {
+    const snoozedUntil = new Date(Date.now() + 86_400_000).toISOString();
+    try {
+      const response = await fetch(`${API_URL}/v1/recommendations/${id}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ status, snoozedUntil }),
+      });
+      return response.ok;
+    } catch (error) {
+      console.error("Failed to snooze recommendation:", error);
+      return false;
+    }
+  }
+  try {
+    const response = await fetch(`${API_URL}/v1/recommendations/${id}`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ status }),
+    });
+    return response.ok;
+  } catch (error) {
+    console.error("Failed to patch recommendation:", error);
+    return false;
+  }
 }

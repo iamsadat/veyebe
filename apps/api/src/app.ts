@@ -1,4 +1,5 @@
 import cors from "@fastify/cors";
+import compress from "@fastify/compress";
 import Fastify, { type FastifyInstance } from "fastify";
 import { assertCloudSafe, auditDerivedPayload, recommendationActionSchema, scanSyncSchema } from "@veyebe/sync";
 import { z } from "zod";
@@ -28,9 +29,12 @@ export async function buildApp(config: AppConfig, store: AppStore): Promise<Fast
       done(null, JSON.parse((body as Buffer).toString("utf8")));
     } catch (error) { done(error as Error, undefined); }
   });
-  await app.register(cors, { origin: false });
+  await app.register(cors, { origin: ["http://localhost", "http://127.0.0.1", "http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173"] });
+  await app.register(compress, { threshold: 1024 });
   app.addHook("onRequest", async (request, reply) => {
-    if (!config.SUPABASE_URL || request.url === "/health" || request.url.startsWith("/v1/github/webhooks")) return;
+    const url = request.url;
+    if (url === "/health" || url.startsWith("/v1/github/webhooks") || url === "/v1/privacy/audit" || url === "/v1/ai/features" || url.startsWith("/v1/github/installations") || url === "/v1/github/install-url" || url.startsWith("/v1/github/issues")) return;
+    if (!config.SUPABASE_URL) return reply.code(503).send({ error: "authentication_not_configured" });
     const token = request.headers.authorization;
     if (!token?.startsWith("Bearer ")) return reply.code(401).send({ error: "authentication_required" });
     const response = await fetch(`${config.SUPABASE_URL}/auth/v1/user`, { headers: { authorization: token, apikey: config.SUPABASE_ANON_KEY! } });
@@ -82,7 +86,8 @@ export async function buildApp(config: AppConfig, store: AppStore): Promise<Fast
     const params = pulseParams.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "invalid_pulse_request" });
     const userId = authenticatedUsers.get(request);
-    if (userId && !await store.canAccessWorkspace(userId, params.data.workspaceId)) return reply.code(403).send({ error: "workspace_forbidden" });
+    if (!userId) return reply.code(401).send({ error: "authentication_required" });
+    if (!await store.canAccessWorkspace(userId, params.data.workspaceId)) return reply.code(403).send({ error: "workspace_forbidden" });
     const pulse = await store.getProjectPulse(params.data.workspaceId, params.data.projectId);
     if (!pulse) return reply.code(404).send({ error: "project_not_found" });
     return pulse;
@@ -95,7 +100,8 @@ export async function buildApp(config: AppConfig, store: AppStore): Promise<Fast
       return reply.code(422).send({ error: "privacy_audit_failed", message: (error as Error).message });
     }
     const userId = authenticatedUsers.get(request);
-    if (userId && !await store.canAccessWorkspace(userId, parsed.data.workspaceId)) return reply.code(403).send({ error: "workspace_forbidden" });
+    if (!userId) return reply.code(401).send({ error: "authentication_required" });
+    if (!await store.canAccessWorkspace(userId, parsed.data.workspaceId)) return reply.code(403).send({ error: "workspace_forbidden" });
     await store.saveSnapshot(parsed.data);
     return reply.code(202).send({ accepted: true, snapshotId: parsed.data.snapshotId });
   });
@@ -104,7 +110,9 @@ export async function buildApp(config: AppConfig, store: AppStore): Promise<Fast
     const params = idParam.safeParse(request.params);
     const body = recommendationActionSchema.safeParse(request.body);
     if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_action" });
-    const updated = await store.saveRecommendationAction({ recommendationId: params.data.id, ...body.data }, authenticatedUsers.get(request));
+    const userId = authenticatedUsers.get(request);
+    if (!userId) return reply.code(401).send({ error: "authentication_required" });
+    const updated = await store.saveRecommendationAction({ recommendationId: params.data.id, ...body.data }, userId);
     if (!updated) return reply.code(403).send({ error: "recommendation_forbidden" });
     return { updated: true };
   });

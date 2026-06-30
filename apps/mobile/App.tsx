@@ -34,14 +34,20 @@ function ActionCard({
   item: Recommendation;
   dispatch: (event: ProjectEvent) => void;
 }) {
+  const [isLoading, setIsLoading] = useState(false);
   const act = async (status: "accepted" | "dismissed" | "snoozed") => {
-    dispatch({ type: "act", id: item.id, status });
-    if (API_URL) {
-      try {
-        await patchRecommendation(item.id, status);
-      } catch {
-        /* Local action remains queued by persisted state. */
+    setIsLoading(true);
+    try {
+      dispatch({ type: "act", id: item.id, status });
+      if (API_URL) {
+        try {
+          await patchRecommendation(item.id, status);
+        } catch {
+          /* Local action remains queued by persisted state. */
+        }
       }
+    } finally {
+      setIsLoading(false);
     }
   };
   return (
@@ -67,17 +73,38 @@ function ActionCard({
       <Text style={styles.rationale}>{item.rationale}</Text>
       <View style={styles.actions}>
         <Pressable
-          style={styles.primaryButton}
+          style={[styles.primaryButton, isLoading && styles.disabledButton]}
           onPress={() => void act("accepted")}
+          disabled={isLoading}
           accessibilityRole="button"
         >
-          <Text style={styles.primaryText}>Accept</Text>
+          {isLoading ? (
+            <ActivityIndicator color="white" />
+          ) : (
+            <Text style={styles.primaryText}>Accept</Text>
+          )}
         </Pressable>
-        <Pressable style={styles.button} onPress={() => void act("snoozed")}>
-          <Text style={styles.buttonText}>Tomorrow</Text>
+        <Pressable
+          style={[styles.button, isLoading && styles.disabledButton]}
+          onPress={() => void act("snoozed")}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#C7CDDA" size="small" />
+          ) : (
+            <Text style={styles.buttonText}>Tomorrow</Text>
+          )}
         </Pressable>
-        <Pressable style={styles.button} onPress={() => void act("dismissed")}>
-          <Text style={styles.buttonText}>Dismiss</Text>
+        <Pressable
+          style={[styles.button, isLoading && styles.disabledButton]}
+          onPress={() => void act("dismissed")}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#C7CDDA" size="small" />
+          ) : (
+            <Text style={styles.buttonText}>Dismiss</Text>
+          )}
         </Pressable>
       </View>
     </View>
@@ -397,19 +424,26 @@ const styles = StyleSheet.create({
   actions: { flexDirection: "row", gap: 8, marginTop: 5 },
   primaryButton: {
     backgroundColor: "#8267E8",
-    paddingHorizontal: 15,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    minHeight: 48,
     borderRadius: 10,
     alignSelf: "flex-start",
+    justifyContent: "center",
   },
   primaryText: { color: "white", fontSize: 12, fontWeight: "800" },
   button: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    minHeight: 48,
     borderRadius: 10,
     backgroundColor: "#20263A",
+    justifyContent: "center",
   },
   buttonText: { color: "#C7CDDA", fontSize: 12, fontWeight: "600" },
+  disabledButton: { opacity: 0.6 },
+  primaryButtonActive: { opacity: 0.85 },
+  buttonActive: { opacity: 0.85 },
   empty: {
     color: "#7E869A",
     backgroundColor: "#111522",
