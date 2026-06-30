@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   Activity,
   Bell,
@@ -50,6 +50,70 @@ const stateIcon: Record<FeatureState, string> = {
   parked: "–",
 };
 type View = "constellation" | "timeline" | "privacy";
+
+// Native View Transitions API (Chromium renderer). Falls back to an instant
+// update when unavailable or when motion is disabled.
+type DocumentVT = Document & { startViewTransition?: (cb: () => void) => unknown };
+function withTransition(reduced: boolean, update: () => void) {
+  const start = (document as DocumentVT).startViewTransition;
+  if (reduced || typeof start !== "function") {
+    update();
+    return;
+  }
+  start.call(document, update);
+}
+
+// Per-item stagger index consumed by CSS animation-delay (var(--i)).
+const stagger = (i: number) => ({ ["--i"]: i } as unknown as CSSProperties);
+
+// RAF tween that rolls every numeric token in a label up to its new value
+// (handles "1,234", "3/8", "42"). No-ops to the final value under reduced motion.
+function useCountUp(value: string, reduced: boolean): string {
+  const [display, setDisplay] = useState(value);
+  const prevNums = useRef<number[] | null>(null);
+  useEffect(() => {
+    const literals = value.split(/\d[\d,]*/);
+    const targets = (value.match(/\d[\d,]*/g) ?? []).map((s) =>
+      Number(s.replace(/,/g, "")),
+    );
+    if (reduced || targets.length === 0) {
+      setDisplay(value);
+      prevNums.current = targets;
+      return;
+    }
+    const starts =
+      prevNums.current && prevNums.current.length === targets.length
+        ? prevNums.current
+        : targets.map(() => 0);
+    const stitch = (nums: number[]) =>
+      literals.reduce(
+        (acc, part, i) =>
+          acc + part + (i < nums.length ? (nums[i] ?? 0).toLocaleString() : ""),
+        "",
+      );
+    const startedAt = performance.now();
+    const duration = 850;
+    let raf = 0;
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - startedAt) / duration);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setDisplay(
+        stitch(
+          targets.map((t, i) => { const s = starts[i] ?? 0; return Math.round(s + (t - s) * eased) }),
+        ),
+      );
+      if (p < 1) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        setDisplay(value);
+        prevNums.current = targets;
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value, reduced]);
+  return display;
+}
 
 export function App() {
   const [snapshot, setSnapshot] = useState<ScanSnapshot>(demoSnapshot);
@@ -472,7 +536,7 @@ const RecommendationList = memo(({
   items: Recommendation[];
   onAct: (id: string, status: Recommendation["status"]) => void;
   onNotice: (value: string) => void;
-}) {
+}) => {
   return (
     <section className="recommendations">
       <div className="section-title">

@@ -13,11 +13,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@veyebe/sync": "0.1.0",
-    "@veyebe/analyzer": "0.1.0",
-    "@veyebe/domain": "0.1.0",
     "@react-three/drei": "^10.5.1",
     "@react-three/fiber": "^9.2.0",
+    "@react-three/postprocessing": "^3.0.4",
+    "@veyebe/analyzer": "0.1.0",
+    "@veyebe/domain": "0.1.0",
+    "@veyebe/sync": "0.1.0",
     "lucide-react": "^0.468.0",
     "react": "19.0.0",
     "react-dom": "19.0.0",
