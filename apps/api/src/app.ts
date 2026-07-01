@@ -15,6 +15,7 @@ const pulseParams = z.object({
   projectId: z.string().min(3).max(100).regex(/^[a-z][a-z0-9_-]*$/i),
 });
 const installationParam = z.object({ installationId: z.coerce.number().int().positive() });
+const githubSourceBody = z.object({ owner: z.string().min(1).max(100), repository: z.string().min(1).max(200) }).strict();
 const issueRequest = z.object({
   installationId: z.number().int().positive(), owner: z.string().min(1).max(100), repository: z.string().min(1).max(100),
   title: z.string().min(1).max(240), body: z.string().max(5000),
@@ -100,6 +101,18 @@ export async function buildApp(config: AppConfig, store: AppStore): Promise<Fast
     return pulse;
   });
 
+  // Link a GitHub repo to a project so its webhook events become timeline evidence.
+  app.post("/v1/workspaces/:workspaceId/projects/:projectId/github-source", async (request, reply) => {
+    const params = pulseParams.safeParse(request.params);
+    const body = githubSourceBody.safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_github_source" });
+    const userId = authenticatedUsers.get(request);
+    if (!userId) return reply.code(401).send({ error: "authentication_required" });
+    if (!await store.canAccessWorkspace(userId, params.data.workspaceId)) return reply.code(403).send({ error: "workspace_forbidden" });
+    await store.linkGitHubRepo({ workspaceId: params.data.workspaceId, projectId: params.data.projectId, owner: body.data.owner, repository: body.data.repository });
+    return reply.code(201).send({ linked: true });
+  });
+
   app.post("/v1/scans", async (request, reply) => {
     const parsed = scanSyncSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_scan", issues: parsed.error.flatten() });
@@ -135,7 +148,9 @@ export async function buildApp(config: AppConfig, store: AppStore): Promise<Fast
     if (!supportedGitHubEvents.has(eventName)) return reply.code(202).send({ accepted: false, reason: "unsupported_event" });
     const normalized = normalizeGitHubEvent(eventName, request.body);
     assertCloudSafe(normalized);
-    const accepted = await store.recordGitHubEvent(deliveryId, eventName, normalized);
+    const repoFullName = (normalized.repository as { fullName?: string } | undefined)?.fullName;
+    const link = repoFullName ? await store.resolveProjectByRepo(repoFullName) : undefined;
+    const accepted = await store.recordGitHubEvent(deliveryId, eventName, normalized, link?.workspaceId);
     if (accepted) {
       // ponytail: worker.ts also drains this via the queue; upsertGitHubEvidence is
       // idempotent so processing inline too is harmless — just shortens latency.
