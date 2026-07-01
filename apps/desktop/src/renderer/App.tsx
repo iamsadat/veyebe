@@ -364,6 +364,21 @@ export function App() {
                     setSnapshot(next);
                     setSelected(next.features.find((f) => f.id === featureId));
                     setNotice("Feature approved and saved locally.");
+
+                    // ponytail: fire-and-forget auto-sync on approval, own try/catch
+                    const desktop = window.veyebeDesktop;
+                    void (async () => {
+                      try {
+                        const result = await desktop.syncApprovedPayload();
+                        setNotice(`Feature approved and synced (${result.snapshotId}).`);
+                      } catch (error) {
+                        setNotice(
+                          error instanceof Error
+                            ? `Feature approved. Sync failed: ${error.message}`
+                            : "Feature approved. Sync failed."
+                        );
+                      }
+                    })();
                   }}
                 />
               ) : (
