@@ -4,6 +4,8 @@ import type { AppConfig } from "./config.js";
 
 export interface RecommendationAction { recommendationId: string; status: "accepted" | "dismissed" | "snoozed"; snoozedUntil?: string }
 
+export interface GitHubEvidenceInput { id: string; workspaceId: string; projectId: string; kind: string; title: string; summary: string; observedAt: string }
+
 export interface ProjectPulse {
   id: string;
   name: string;
@@ -21,6 +23,30 @@ export interface AppStore {
   canAccessWorkspace(userId: string, workspaceId: string): Promise<boolean>;
   recordGitHubEvent(deliveryId: string, eventName: string, payload: unknown, workspaceId?: string): Promise<boolean>;
   getGitHubEvent(deliveryId: string): Promise<{ event_name: string; payload: unknown; workspace_id?: string } | undefined>;
+  upsertGitHubEvidence(input: GitHubEvidenceInput): Promise<void>;
+}
+
+// ponytail: deterministic keyword-free heuristics over feature state/confidence — no ML, upgrade if product wants smarter ranking
+function deriveInsights(payload: ScanSyncPayload): { recommendations: ProjectPulse["recommendations"]; milestones: ProjectPulse["milestones"] } {
+  const recommendations: ProjectPulse["recommendations"] = [];
+  const milestones: ProjectPulse["milestones"] = [];
+  for (const feature of payload.features) {
+    const { id, title, state, confidence } = feature;
+    if (state === "blocked") {
+      recommendations.push({ id: `rec-${id}`, title: `Unblock ${title}`, rationale: `${title} is blocked and needs attention.`, confidence, severity: "critical", status: "open" });
+    } else if (state === "needs_verification") {
+      recommendations.push({ id: `rec-${id}`, title: `Verify ${title}`, rationale: `${title} needs verification before it can be trusted.`, confidence, severity: "attention", status: "open" });
+    } else if (confidence < 0.5 && (state === "proposed" || state === "planned")) {
+      recommendations.push({ id: `rec-${id}`, title: `Clarify ${title}`, rationale: `${title} has low confidence and needs clarification.`, confidence, severity: "opportunity", status: "open" });
+    }
+
+    if (state === "verified") {
+      milestones.push({ id: `ms-${id}`, title, date: payload.capturedAt, kind: "actual" });
+    } else if (state === "active" || state === "planned") {
+      milestones.push({ id: `ms-${id}`, title, kind: "planned" });
+    }
+  }
+  return { recommendations: recommendations.slice(0, 12), milestones: milestones.slice(0, 12) };
 }
 
 function denormalizeSnapshot(store: MemoryStore, payload: ScanSyncPayload) {
@@ -51,12 +77,21 @@ export class MemoryStore implements AppStore {
   readonly projects = new Map<string, { id: string; workspaceId: string; name: string; goal: string; updatedAt: string }>();
   readonly features = new Map<string, { id: string; workspaceId: string; projectId: string; title: string; intent: string; state: string; confidence: number; approved: boolean }>();
   readonly evidence = new Map<string, { id: string; workspaceId: string; projectId: string }>();
+  readonly recommendations = new Map<string, { id: string; workspaceId: string; projectId: string; title: string; rationale: string; confidence: number; severity: string; status: string }>();
+  readonly milestones = new Map<string, { id: string; workspaceId: string; projectId: string; title: string; date?: string; kind: "actual" | "planned" }>();
   readonly githubEvents = new Map<string, { event_name: string; payload: unknown; workspace_id?: string }>();
   readonly workspaceMembers = new Map<string, Set<string>>();
 
   async saveSnapshot(payload: ScanSyncPayload): Promise<void> {
     this.snapshots.set(payload.snapshotId, payload);
     denormalizeSnapshot(this, payload);
+    const insights = deriveInsights(payload);
+    for (const rec of insights.recommendations) {
+      this.recommendations.set(rec.id, { ...rec, workspaceId: payload.workspaceId, projectId: payload.projectId });
+    }
+    for (const ms of insights.milestones) {
+      this.milestones.set(ms.id, { ...ms, workspaceId: payload.workspaceId, projectId: payload.projectId });
+    }
   }
 
   async getProjectPulse(workspaceId: string, projectId: string): Promise<ProjectPulse | undefined> {
@@ -74,19 +109,27 @@ export class MemoryStore implements AppStore {
         confidence: item.confidence,
         approved: item.approved,
       }));
+    const recommendations = [...this.recommendations.values()]
+      .filter((r) => r.workspaceId === workspaceId && r.projectId === projectId && r.status !== "dismissed" && r.status !== "snoozed")
+      .map(({ id, title, rationale, confidence, severity, status }) => ({ id, title, rationale, confidence, severity, status }));
+    const milestones = [...this.milestones.values()]
+      .filter((m) => m.workspaceId === workspaceId && m.projectId === projectId)
+      .map(({ id, title, date, kind }) => ({ id, title, date, kind }));
     return {
       id: projectId,
       name: project?.name ?? snapshot?.projectName ?? projectId,
       goal: project?.goal ?? snapshot?.goal ?? "",
       updatedLabel: `Synced · ${new Date(project?.updatedAt ?? snapshot?.capturedAt ?? Date.now()).toLocaleString()}`,
       features,
-      recommendations: [],
-      milestones: [],
+      recommendations,
+      milestones,
     };
   }
 
   async saveRecommendationAction(action: RecommendationAction, userId?: string): Promise<boolean> {
     this.actions.set(action.recommendationId, action);
+    const rec = this.recommendations.get(action.recommendationId);
+    if (rec) rec.status = action.status;
     return true;
   }
   async canAccessWorkspace(userId: string, workspaceId: string): Promise<boolean> {
@@ -101,6 +144,9 @@ export class MemoryStore implements AppStore {
   }
   async getGitHubEvent(deliveryId: string): Promise<{ event_name: string; payload: unknown; workspace_id?: string } | undefined> {
     return this.githubEvents.get(deliveryId);
+  }
+  async upsertGitHubEvidence(input: GitHubEvidenceInput): Promise<void> {
+    this.evidence.set(input.id, { id: input.id, workspaceId: input.workspaceId, projectId: input.projectId });
   }
 }
 
@@ -141,6 +187,26 @@ class SupabaseStore implements AppStore {
         })),
       );
       if (evidenceError) throw evidenceError;
+    }
+
+    const insights = deriveInsights(payload);
+    if (insights.recommendations.length) {
+      const { error: recError } = await this.client.from("recommendations").upsert(
+        insights.recommendations.map((rec) => ({
+          id: rec.id, workspace_id: payload.workspaceId, project_id: payload.projectId,
+          title: rec.title, rationale: rec.rationale, confidence: rec.confidence, severity: rec.severity, status: rec.status,
+        })),
+      );
+      if (recError) throw recError;
+    }
+    if (insights.milestones.length) {
+      const { error: milestoneError } = await this.client.from("milestones").upsert(
+        insights.milestones.map((ms) => ({
+          id: ms.id, workspace_id: payload.workspaceId, project_id: payload.projectId,
+          title: ms.title, target_at: ms.date ?? null, state: ms.kind === "actual" ? "verified" : "planned",
+        })),
+      );
+      if (milestoneError) throw milestoneError;
     }
 
     await this.client.from("privacy_audit_log").insert({
@@ -226,6 +292,15 @@ class SupabaseStore implements AppStore {
     const { data, error } = await this.client.from("github_events").select("event_name,payload,workspace_id").eq("delivery_id", deliveryId).maybeSingle();
     if (error) throw error;
     return data ?? undefined;
+  }
+
+  async upsertGitHubEvidence(input: GitHubEvidenceInput): Promise<void> {
+    const { error } = await this.client.from("evidence").upsert({
+      id: input.id, workspace_id: input.workspaceId, project_id: input.projectId,
+      kind: input.kind, title: input.title, summary: input.summary,
+      observed_at: input.observedAt, confidence: 1, tags: [],
+    });
+    if (error) throw error;
   }
 }
 

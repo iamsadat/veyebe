@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { inferFeatures } from "./ai.js";
 import { githubInstallationRequest, normalizeGitHubEvent, supportedGitHubEvents, verifyGitHubSignature } from "./github.js";
+import { processGitHubEvent } from "./jobs/github-event.js";
 import type { AppStore } from "./store.js";
 
 const idParam = z.object({ id: z.string().min(3).max(100).regex(/^[a-z][a-z0-9_-]*$/i) });
@@ -34,7 +35,13 @@ export async function buildApp(config: AppConfig, store: AppStore): Promise<Fast
   app.addHook("onRequest", async (request, reply) => {
     const url = request.url;
     if (url === "/health" || url.startsWith("/v1/github/webhooks") || url === "/v1/privacy/audit" || url === "/v1/ai/features" || url.startsWith("/v1/github/installations") || url === "/v1/github/install-url" || url.startsWith("/v1/github/issues")) return;
-    if (!config.SUPABASE_URL) return reply.code(503).send({ error: "authentication_not_configured" });
+    if (!config.SUPABASE_URL) {
+      // ponytail: no Supabase = local/memory mode. Lock it in production, but let dev/test
+      // run with a synthetic local user — workspace access is still enforced by the store.
+      if (config.NODE_ENV === "production") return reply.code(503).send({ error: "authentication_not_configured" });
+      authenticatedUsers.set(request, "local-user");
+      return;
+    }
     const token = request.headers.authorization;
     if (!token?.startsWith("Bearer ")) return reply.code(401).send({ error: "authentication_required" });
     const response = await fetch(`${config.SUPABASE_URL}/auth/v1/user`, { headers: { authorization: token, apikey: config.SUPABASE_ANON_KEY! } });
@@ -129,6 +136,11 @@ export async function buildApp(config: AppConfig, store: AppStore): Promise<Fast
     const normalized = normalizeGitHubEvent(eventName, request.body);
     assertCloudSafe(normalized);
     const accepted = await store.recordGitHubEvent(deliveryId, eventName, normalized);
+    if (accepted) {
+      // ponytail: worker.ts also drains this via the queue; upsertGitHubEvidence is
+      // idempotent so processing inline too is harmless — just shortens latency.
+      try { await processGitHubEvent(store, deliveryId); } catch (error) { app.log.error(error); }
+    }
     return reply.code(accepted ? 202 : 200).send({ accepted, duplicate: !accepted });
   });
 
