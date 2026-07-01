@@ -13,6 +13,10 @@ export async function setStoredToken(token: string): Promise<void> {
   await AsyncStorage.setItem(TOKEN_KEY, token);
 }
 
+export async function clearStoredToken(): Promise<void> {
+  await AsyncStorage.removeItem(TOKEN_KEY);
+}
+
 export async function fetchProjectPulse(
   workspaceId: string,
   projectId: string,
