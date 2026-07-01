@@ -6,6 +6,15 @@ export interface RecommendationAction { recommendationId: string; status: "accep
 
 export interface GitHubEvidenceInput { id: string; workspaceId: string; projectId: string; kind: string; title: string; summary: string; observedAt: string }
 
+export interface RepoLink { workspaceId: string; projectId: string }
+export interface RepoLinkInput extends RepoLink { owner: string; repository: string }
+
+// "owner/repo" -> { owner, repo }, lowercased. Undefined if it isn't a full name.
+function splitRepo(fullName: string): { owner: string; repo: string } | undefined {
+  const [owner, repo] = fullName.toLowerCase().split("/");
+  return owner && repo ? { owner, repo } : undefined;
+}
+
 export interface ProjectPulse {
   id: string;
   name: string;
@@ -24,6 +33,8 @@ export interface AppStore {
   recordGitHubEvent(deliveryId: string, eventName: string, payload: unknown, workspaceId?: string): Promise<boolean>;
   getGitHubEvent(deliveryId: string): Promise<{ event_name: string; payload: unknown; workspace_id?: string } | undefined>;
   upsertGitHubEvidence(input: GitHubEvidenceInput): Promise<void>;
+  resolveProjectByRepo(fullName: string): Promise<RepoLink | undefined>;
+  linkGitHubRepo(input: RepoLinkInput): Promise<void>;
 }
 
 // ponytail: deterministic keyword-free heuristics over feature state/confidence — no ML, upgrade if product wants smarter ranking
@@ -80,6 +91,7 @@ export class MemoryStore implements AppStore {
   readonly recommendations = new Map<string, { id: string; workspaceId: string; projectId: string; title: string; rationale: string; confidence: number; severity: string; status: string }>();
   readonly milestones = new Map<string, { id: string; workspaceId: string; projectId: string; title: string; date?: string; kind: "actual" | "planned" }>();
   readonly githubEvents = new Map<string, { event_name: string; payload: unknown; workspace_id?: string }>();
+  readonly githubSources = new Map<string, RepoLink>();
   readonly workspaceMembers = new Map<string, Set<string>>();
 
   async saveSnapshot(payload: ScanSyncPayload): Promise<void> {
@@ -147,6 +159,13 @@ export class MemoryStore implements AppStore {
   }
   async upsertGitHubEvidence(input: GitHubEvidenceInput): Promise<void> {
     this.evidence.set(input.id, { id: input.id, workspaceId: input.workspaceId, projectId: input.projectId });
+  }
+  async resolveProjectByRepo(fullName: string): Promise<RepoLink | undefined> {
+    const parts = splitRepo(fullName);
+    return parts ? this.githubSources.get(`${parts.owner}/${parts.repo}`) : undefined;
+  }
+  async linkGitHubRepo(input: RepoLinkInput): Promise<void> {
+    this.githubSources.set(`${input.owner}/${input.repository}`.toLowerCase(), { workspaceId: input.workspaceId, projectId: input.projectId });
   }
 }
 
@@ -300,6 +319,25 @@ class SupabaseStore implements AppStore {
       kind: input.kind, title: input.title, summary: input.summary,
       observed_at: input.observedAt, confidence: 1, tags: [],
     });
+    if (error) throw error;
+  }
+
+  async resolveProjectByRepo(fullName: string): Promise<RepoLink | undefined> {
+    const parts = splitRepo(fullName);
+    if (!parts) return undefined;
+    const { data, error } = await this.client.from("project_sources")
+      .select("workspace_id, project_id")
+      .eq("kind", "github").eq("github_owner", parts.owner).eq("github_repository", parts.repo)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? { workspaceId: data.workspace_id as string, projectId: data.project_id as string } : undefined;
+  }
+
+  async linkGitHubRepo(input: RepoLinkInput): Promise<void> {
+    const { error } = await this.client.from("project_sources").upsert({
+      project_id: input.projectId, workspace_id: input.workspaceId, kind: "github",
+      github_owner: input.owner.toLowerCase(), github_repository: input.repository.toLowerCase(),
+    }, { onConflict: "project_id,kind" });
     if (error) throw error;
   }
 }

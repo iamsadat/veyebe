@@ -58,4 +58,23 @@ describe("API", () => {
     expect((await app.inject(request)).json()).toMatchObject({ duplicate: true });
     await app.close();
   });
+
+  it("attaches GitHub events as evidence for a linked repo", async () => {
+    const store = new MemoryStore();
+    const app = await buildApp(config, store);
+    await app.inject({ method: "POST", url: "/v1/scans", payload: samplePayload });
+    await store.linkGitHubRepo({ workspaceId: "workspace_personal", projectId: "project_abc123", owner: "acme", repository: "app" });
+    const payload = { action: "opened", repository: { full_name: "acme/app", id: 1 }, issue: { number: 7, title: "Fix login", html_url: "https://example.com/i/7", state: "open" } };
+    const signature = `sha256=${createHmac("sha256", config.GITHUB_WEBHOOK_SECRET!).update(JSON.stringify(payload)).digest("hex")}`;
+    const response = await app.inject({ method: "POST", url: "/v1/github/webhooks", payload, headers: { "x-hub-signature-256": signature, "x-github-delivery": "delivery-ev-1", "x-github-event": "issues" } });
+    expect(response.json()).toMatchObject({ accepted: true });
+    const linked = [...store.evidence.values()].filter((item) => item.projectId === "project_abc123" && item.id.startsWith("gh-"));
+    expect(linked.length).toBe(1);
+    // an unlinked repo attaches nothing
+    const other = { action: "opened", repository: { full_name: "someone/else", id: 2 }, issue: { number: 8, title: "No link", html_url: "https://example.com/i/8", state: "open" } };
+    const sig2 = `sha256=${createHmac("sha256", config.GITHUB_WEBHOOK_SECRET!).update(JSON.stringify(other)).digest("hex")}`;
+    await app.inject({ method: "POST", url: "/v1/github/webhooks", payload: other, headers: { "x-hub-signature-256": sig2, "x-github-delivery": "delivery-ev-2", "x-github-event": "issues" } });
+    expect([...store.evidence.values()].filter((item) => item.id.startsWith("gh-")).length).toBe(1);
+    await app.close();
+  });
 });
