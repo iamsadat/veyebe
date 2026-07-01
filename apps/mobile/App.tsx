@@ -11,6 +11,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   type StyleProp,
   type ViewStyle,
@@ -24,6 +25,7 @@ import {
   type Recommendation,
 } from "./src/model";
 import { fetchProjectPulse, patchRecommendation } from "./src/sync";
+import { authConfigured, isAuthed, signIn, signOut } from "./src/auth";
 import { useReducedMotion } from "./src/useReducedMotion";
 
 const STORAGE_KEY = "veyebe.project-pulse.v1";
@@ -115,18 +117,81 @@ function ActionCard({
   );
 }
 
+function LoginScreen({ onSignedIn }: { onSignedIn: () => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string>();
+  const [loading, setLoading] = useState(false);
+  const submit = async () => {
+    setLoading(true);
+    setError(undefined);
+    const result = await signIn(email.trim(), password);
+    setLoading(false);
+    if (result.ok) onSignedIn();
+    else setError(result.error);
+  };
+  return (
+    <SafeAreaView style={styles.loginPage}>
+      <Text style={styles.brand}>VEYEBE</Text>
+      <Text style={styles.loginTitle}>Sign in to sync your project pulse</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Email"
+        placeholderTextColor="#6B7280"
+        value={email}
+        onChangeText={setEmail}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="email-address"
+        accessibilityLabel="Email"
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Password"
+        placeholderTextColor="#6B7280"
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+        accessibilityLabel="Password"
+      />
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      <Pressable
+        style={[styles.primaryButton, styles.loginButton, loading && styles.disabledButton]}
+        onPress={() => void submit()}
+        disabled={loading}
+        accessibilityRole="button"
+      >
+        {loading ? <ActivityIndicator color="white" /> : <Text style={styles.primaryText}>Sign in</Text>}
+      </Pressable>
+    </SafeAreaView>
+  );
+}
+
 function AppContent() {
   const [project, dispatch] = useReducer(projectReducer, demoProject);
   const [hydrated, setHydrated] = useState(false);
+  const [authed, setAuthed] = useState(!authConfigured);
   const [visual, setVisual] = useState(true);
   const reducedMotion = useReducedMotion();
+  const loadRemote = async () => {
+    if (!API_URL) return;
+    const remote = await fetchProjectPulse(WORKSPACE_ID, PROJECT_ID);
+    if (remote) dispatch({ type: "replace", project: remote });
+  };
+  const handleSignedIn = () => {
+    setAuthed(true);
+    void loadRemote();
+  };
+  const handleSignOut = async () => {
+    await signOut();
+    setAuthed(false);
+  };
   useEffect(() => {
     void (async () => {
-      if (API_URL) {
-        const remote = await fetchProjectPulse(WORKSPACE_ID, PROJECT_ID);
-        if (remote) {
-          dispatch({ type: "replace", project: remote });
-        }
+      const authOk = authConfigured ? await isAuthed() : true;
+      setAuthed(authOk);
+      if (API_URL && authOk) {
+        await loadRemote();
       }
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       if (stored) {
@@ -165,6 +230,7 @@ function AppContent() {
         <Text style={styles.muted}>Restoring your project pulse…</Text>
       </View>
     );
+  if (authConfigured && !authed) return <LoginScreen onSignedIn={handleSignedIn} />;
   return (
     <ScrollView
       contentContainerStyle={styles.page}
@@ -172,11 +238,22 @@ function AppContent() {
     >
       <View style={styles.eyebrowRow}>
         <Text style={styles.brand}>VEYEBE</Text>
-        <View style={styles.localBadge}>
-          <View style={styles.onlineDot} />
-          <Text style={styles.localText}>
-            {API_URL ? "SYNC READY" : "LOCAL MODE"}
-          </Text>
+        <View style={styles.eyebrowRight}>
+          <View style={styles.localBadge}>
+            <View style={styles.onlineDot} />
+            <Text style={styles.localText}>
+              {API_URL ? "SYNC READY" : "LOCAL MODE"}
+            </Text>
+          </View>
+          {authConfigured && authed && (
+            <Pressable
+              onPress={() => void handleSignOut()}
+              accessibilityRole="button"
+              accessibilityLabel="Sign out"
+            >
+              <Text style={styles.signOutText}>Sign out</Text>
+            </Pressable>
+          )}
         </View>
       </View>
       <Text style={styles.project}>{project.name}</Text>
@@ -317,6 +394,33 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   muted: { color: "#687086" },
+  loginPage: {
+    flex: 1,
+    backgroundColor: "#090C15",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+    gap: 14,
+  },
+  loginTitle: {
+    color: "#E7EAF2",
+    fontSize: 20,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  input: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: "#232A3A",
+    borderRadius: 12,
+    backgroundColor: "#10141F",
+    color: "#E7EAF2",
+    paddingHorizontal: 14,
+    fontSize: 15,
+  },
+  loginButton: { marginTop: 4 },
+  errorText: { color: "#FF7A90", fontSize: 13 },
+  eyebrowRight: { flexDirection: "row", alignItems: "center", gap: 12 },
+  signOutText: { color: "#8891A6", fontSize: 12, fontWeight: "600" },
   eyebrowRow: {
     flexDirection: "row",
     justifyContent: "space-between",
